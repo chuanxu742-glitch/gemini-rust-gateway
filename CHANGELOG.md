@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Absorbed rotated `__Secure-1PSIDTS` cookies from the response and persisted them to the accounts file. Credentials were previously only ever written by the Chrome extension, so the configured value was replayed until it expired, leaving Docker and headless deployments with no way to renew a session and a recovery probe that retried a cookie that could never start working again.
+
 - Changed requests that cannot be served because no account is ready, the selected account is disabled, or it is cooling down to return `503` with error type `not_ready`, matching `/readyz`. These previously returned `502 provider_error`, which is now reserved for genuine upstream failures.
 - Stopped spending the retry budget on deterministic failures, so a request with no ready account fails immediately instead of after the full backoff sequence.
 - Documented that Windows builds must go through `build.ps1`, including the BoringSSL `gcc.exe` error produced by calling cargo directly.

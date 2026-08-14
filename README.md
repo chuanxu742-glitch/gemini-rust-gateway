@@ -21,6 +21,7 @@
 - 使用 `wreq`/BoringSSL 模拟浏览器 TLS 指纹
 - 内嵌 Web 控制台，无需 Node.js，可直接测试聊天、图片和任务
 - Gemini Web BL/会话元数据自动刷新、有界指数退避重试
+- 自动吸收并持久化 Google 轮换的 `__Secure-1PSIDTS`，无需浏览器参与
 - 多账号隔离、`/u/0`/`/u/1` 路径、健康轮换与故障转移
 - Chrome Cookie 同步扩展（支持定时自动同步）和 `HTTPS_PROXY`/`ALL_PROXY` 环境变量
 - Windows DPAPI Cookie 加密、独立管理令牌和账号后台健康恢复
@@ -247,6 +248,8 @@ curl http://127.0.0.1:8000/v1/tasks/<task_id> \
 
 ## Chrome Cookie 同步
 
+扩展负责的是**首次注入凭据**，以及会话彻底失效后的重新授权。日常续期不依赖它：`__Secure-1PSIDTS` 由 Google 定期轮换并通过 `Set-Cookie` 下发，网关会在请求成功时接住新值并写回账号文件，因此 Docker 或无浏览器的服务器部署同样可以长期自维持。详见[会话续期](#会话续期)。
+
 项目自带 [`chrome-extension`](chrome-extension) 扩展。**Cookie 由扩展从浏览器自动读取，不需要手动复制或粘贴**；扩展中要填的只是网关地址和账号归属信息。
 
 开始前请确认两个前置条件，否则同步一定失败：
@@ -275,6 +278,19 @@ X-Gemini-Account: work
 Windows 上，账号文件中的 Cookie 使用当前 Windows 用户绑定的 DPAPI 加密；复制到其他用户或机器后无法解密。Linux/macOS 使用权限为 `0600` 的本地文件，容器部署建议通过受保护的数据卷或 Secret Manager 管理。
 
 当已有 Cookie 过期且 Cookie 同步已开启时，网关会以降级模式启动：控制台、健康检查和同步端点仍可访问，模型请求返回未就绪；扩展同步成功后服务立即恢复，不需要重启。
+
+## 会话续期
+
+`__Secure-1PSID` 相对长效，`__Secure-1PSIDTS` 会被 Google 定期轮换，并通过响应的 `Set-Cookie` 下发新值。网关在以下时机接住轮换：会话建立成功、会话刷新成功、以及每次生成请求返回成功响应。新值会写回 `GEMINI_ACCOUNTS_FILE`，因此重启后依然有效。
+
+这条链路不需要浏览器，也不需要扩展在线，Docker 和无头服务器部署可以长期无人值守。持久化失败只记录警告，不会中断当次请求，内存中的新值仍然可用。
+
+仍需要重新授权的情况：
+
+- 账号长期完全空闲，`__Secure-1PSIDTS` 在没有任何请求可承载轮换的情况下过期。
+- Google 主动登出会话，或 `__Secure-1PSID` 本身失效。
+
+此时账号会被标记为未就绪，`/v1/accounts` 会显示原因，重新同步一次 Cookie 即可恢复。
 
 ## 构建与测试
 

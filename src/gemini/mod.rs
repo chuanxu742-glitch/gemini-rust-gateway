@@ -78,6 +78,7 @@ struct AccountRuntime {
 #[derive(Clone)]
 struct AccountState {
     http: reqwest::Client,
+    jar: Arc<reqwest::cookie::Jar>,
     metadata: session::SessionMetadata,
     config: Arc<Config>,
 }
@@ -108,7 +109,10 @@ impl GeminiClient {
                 continue;
             }
             match account.activate(&client.reqid).await {
-                Ok(()) => client.set_ready(&account, true),
+                Ok(()) => {
+                    client.set_ready(&account, true);
+                    client.persist_rotated_cookie(&account).await;
+                }
                 Err(error) => {
                     account.set_error(error.to_string()).await;
                     last_error = Some(error);
@@ -199,6 +203,7 @@ impl GeminiClient {
             match account.activate(&self.reqid).await {
                 Ok(()) => {
                     self.set_ready(&account, true);
+                    self.persist_rotated_cookie(&account).await;
                     tracing::info!(account_id = %account.id, "Gemini account recovered");
                 }
                 Err(error) => {
@@ -331,6 +336,9 @@ impl GeminiClient {
             let status = response.status();
             if status.is_success() {
                 account.clear_error().await;
+                // The response headers are in; if this request carried a
+                // rotated cookie the jar already holds it.
+                self.persist_rotated_cookie(&account).await;
                 let account_id = account.id.clone();
                 let monitored = account.clone();
                 let mut provider = stream::parse_response_stream(
@@ -503,13 +511,50 @@ impl GeminiClient {
     }
 
     async fn refresh_account(&self, account: &Arc<AccountRuntime>) -> Result<()> {
-        let _guard = account.refresh_lock.lock().await;
-        let state = account.state.read().await.clone();
-        let metadata = session::fetch_session(&state.http, &state.config).await?;
-        account.state.write().await.metadata = metadata;
-        account.clear_error().await;
+        {
+            let _guard = account.refresh_lock.lock().await;
+            let state = account.state.read().await.clone();
+            let metadata = session::fetch_session(&state.http, &state.jar, &state.config).await?;
+            account.state.write().await.metadata = metadata;
+            account.clear_error().await;
+        }
         self.set_ready(account, true);
+        self.persist_rotated_cookie(account).await;
         Ok(())
+    }
+
+    /// Move a rotated cookie from the jar into the account config and write it
+    /// to disk, so the rotation survives a restart.
+    ///
+    /// Persistence failures are logged rather than propagated: the request that
+    /// carried the rotation already succeeded, and the absorbed value stays
+    /// usable in memory until the next one arrives.
+    async fn persist_rotated_cookie(&self, account: &Arc<AccountRuntime>) {
+        if !account.absorb_rotated_cookie().await {
+            return;
+        }
+        match self.persist_accounts().await {
+            Ok(()) => {
+                tracing::info!(account_id = %account.id, "persisted rotated Gemini cookie");
+            }
+            Err(error) => {
+                tracing::warn!(
+                    account_id = %account.id,
+                    %error,
+                    "could not persist rotated Gemini cookie"
+                );
+            }
+        }
+    }
+
+    async fn persist_accounts(&self) -> Result<()> {
+        let _guard = self.persistence_lock.lock().await;
+        let mut stored = Vec::new();
+        for account in self.accounts.read().await.values() {
+            stored.push(account.credentials().await);
+        }
+        stored.sort_by(|left, right| left.id.cmp(&right.id));
+        accounts::persist(&self.config.accounts_file, &stored).await
     }
 
     async fn retry_delay(&self, attempt: usize) {
@@ -716,11 +761,12 @@ impl AccountRuntime {
         account_config.secure_1psid = credentials.secure_1psid;
         account_config.secure_1psidts = credentials.secure_1psidts;
         let account_config = Arc::new(account_config);
-        let http = session::build_http_client(&account_config)?;
+        let (http, jar) = session::build_http_client(&account_config)?;
         Ok(Self {
             id: credentials.id,
             state: RwLock::new(AccountState {
                 http,
+                jar,
                 metadata: session::SessionMetadata {
                     access_token: None,
                     build_label: None,
@@ -743,7 +789,7 @@ impl AccountRuntime {
     async fn activate(&self, reqid: &AtomicU64) -> Result<()> {
         let _guard = self.refresh_lock.lock().await;
         let state = self.state.read().await.clone();
-        let metadata = session::fetch_session(&state.http, &state.config).await?;
+        let metadata = session::fetch_session(&state.http, &state.jar, &state.config).await?;
         let request_id = reqid.fetch_add(100_000, Ordering::Relaxed);
         batch::batch_execute(
             &state.http,
@@ -758,6 +804,23 @@ impl AccountRuntime {
         self.state.write().await.metadata = metadata;
         self.clear_error().await;
         Ok(())
+    }
+
+    /// Pull a rotated `__Secure-1PSIDTS` out of the jar into the account
+    /// config. Returns whether the value actually changed.
+    async fn absorb_rotated_cookie(&self) -> bool {
+        let state = self.state.read().await.clone();
+        let Some(rotated) = session::rotated_psidts(
+            &state.jar,
+            &state.config.provider_origin,
+            state.config.secure_1psidts.as_deref(),
+        ) else {
+            return false;
+        };
+        let mut config = (*state.config).clone();
+        config.secure_1psidts = Some(rotated);
+        self.state.write().await.config = Arc::new(config);
+        true
     }
 
     async fn credentials(&self) -> AccountCredentials {
@@ -1041,5 +1104,63 @@ mod tests {
                 .any(|status| status.id == "a" && status.cooldown_seconds > 0)
         );
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn rotated_cookie_is_absorbed_and_persisted() {
+        // Google rotates 1PSIDTS through Set-Cookie. Without absorbing it the
+        // gateway keeps replaying the captured value until it expires, and no
+        // amount of retrying recovers, since only an external sync can help.
+        async fn session_page() -> axum::response::Response {
+            (
+                StatusCode::OK,
+                [("set-cookie", "__Secure-1PSIDTS=rotated-by-google; Path=/")],
+                r#"{"SNlM0e":"token","cfb2h":"build","FdrFJe":"session","TuX5cc":"en"}"#,
+            )
+                .into_response()
+        }
+        async fn batch_ok() -> &'static str {
+            "ok"
+        }
+
+        let app = Router::new()
+            .route("/", get(session_page))
+            .route("/u/{auth_user}/app", get(session_page))
+            .route(
+                "/u/{auth_user}/_/BardChatUi/data/batchexecute",
+                post(batch_ok),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let root = tempfile::tempdir().unwrap();
+        let mut config = (*test_config(root.path())).clone();
+        config.secure_1psid.clear();
+        config.provider_origin = format!("http://{address}");
+        let config = Arc::new(config);
+        accounts::persist(
+            &config.accounts_file,
+            &[AccountCredentials {
+                id: "a".into(),
+                auth_user: 0,
+                secure_1psid: "cookie-a-value".into(),
+                secure_1psidts: Some("stale-psidts".into()),
+                enabled: true,
+                weight: 1,
+            }],
+        )
+        .await
+        .unwrap();
+
+        GeminiClient::initialize(config.clone()).await.unwrap();
+        let stored = accounts::load(&config).unwrap();
+        server.abort();
+
+        assert_eq!(
+            stored[0].secure_1psidts.as_deref(),
+            Some("rotated-by-google"),
+            "the rotated cookie should have replaced the stale one on disk"
+        );
     }
 }
