@@ -65,27 +65,45 @@ pub(super) fn build_http_client(config: &Config) -> Result<(Client, Arc<Jar>), G
     Ok((builder.build()?, jar))
 }
 
-/// Read the jar's current `__Secure-1PSIDTS`.
-///
-/// Google rotates this cookie and delivers the replacement through
-/// `Set-Cookie`; the jar absorbs it automatically. Reading it back is what
-/// lets a rotation outlive the process, since the configured value is
-/// otherwise the only one ever used.
-///
-/// The lookup is scoped to `origin` rather than a fixed Google host so that it
-/// follows wherever the provider actually served the response.
-pub(super) fn current_psidts(jar: &Jar, origin: &str) -> Option<String> {
-    let value = jar.get(PSIDTS_COOKIE, origin)?.value().to_owned();
-    if value.is_empty() { None } else { Some(value) }
+/// What the cookie jar currently holds for `__Secure-1PSIDTS`.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Psidts {
+    /// The provider has never sent this cookie.
+    Absent,
+    /// Present, and equal to what is already configured.
+    Unchanged,
+    /// Present and different: Google rotated it.
+    Rotated(String),
 }
 
-/// The jar's value when it differs from what is currently persisted.
-pub(super) fn rotated_psidts(jar: &Jar, origin: &str, current: Option<&str>) -> Option<String> {
-    let value = current_psidts(jar, origin)?;
-    if current == Some(value.as_str()) {
-        None
+/// Classify the jar's `__Secure-1PSIDTS` against the configured value.
+///
+/// Scans by name rather than using `Jar::get`, which matches host, path and
+/// name exactly. Google sets this cookie with `Domain=.google.com`, so it is
+/// keyed under `google.com` while requests go to `gemini.google.com`; an exact
+/// lookup keyed on the request host silently finds nothing and every rotation
+/// would look identical to the provider never sending one.
+///
+/// Two entries can coexist, because the value injected at startup is keyed by
+/// its `Domain` attribute while a replacement without one is keyed by the
+/// request host. Returning the first match would then be a coin flip between
+/// the stale and the fresh value, so the one that differs from the configured
+/// value wins: it is the only one that can be new.
+pub(super) fn psidts_state(jar: &Jar, current: Option<&str>) -> Psidts {
+    let mut present = false;
+    for cookie in jar.get_all() {
+        if cookie.name() != PSIDTS_COOKIE || cookie.value().is_empty() {
+            continue;
+        }
+        present = true;
+        if current != Some(cookie.value()) {
+            return Psidts::Rotated(cookie.value().to_owned());
+        }
+    }
+    if present {
+        Psidts::Unchanged
     } else {
-        Some(value)
+        Psidts::Absent
     }
 }
 
@@ -96,8 +114,10 @@ pub(super) async fn fetch_session(
 ) -> Result<SessionMetadata, GatewayError> {
     // Prefer the jar: Google may have rotated 1PSIDTS since the configured
     // value was captured, and sending the stale one would undo the rotation.
-    let psidts =
-        current_psidts(jar, &config.provider_origin).or_else(|| config.secure_1psidts.clone());
+    let psidts = match psidts_state(jar, config.secure_1psidts.as_deref()) {
+        Psidts::Rotated(value) => Some(value),
+        Psidts::Unchanged | Psidts::Absent => config.secure_1psidts.clone(),
+    };
     let mut auth_cookie = format!("__Secure-1PSID={}", config.secure_1psid);
     if let Some(psidts) = &psidts {
         auth_cookie.push_str("; __Secure-1PSIDTS=");
@@ -171,5 +191,49 @@ mod tests {
         assert_eq!(app_path(2), "/u/2/app");
         assert!(generate_url(GEMINI_ORIGIN, 1).contains("/u/1/_/BardChatUi/"));
         assert!(batch_url(GEMINI_ORIGIN, 7).contains("/u/7/_/BardChatUi/"));
+    }
+
+    #[test]
+    fn psidts_state_reports_absent_unchanged_and_rotated() {
+        assert_eq!(psidts_state(&Jar::default(), None), Psidts::Absent);
+        assert_eq!(
+            psidts_state(&Jar::default(), Some("configured")),
+            Psidts::Absent,
+            "a configured value the provider never echoed is still absent from the jar"
+        );
+
+        // Keyed under google.com by its Domain attribute, while requests go to
+        // gemini.google.com. An exact host lookup would miss this entirely.
+        let jar = Jar::default();
+        jar.add(
+            "__Secure-1PSIDTS=first-value; Domain=.google.com; Path=/; Secure",
+            COOKIE_ORIGIN,
+        );
+        assert_eq!(psidts_state(&jar, Some("first-value")), Psidts::Unchanged);
+        assert_eq!(
+            psidts_state(&jar, Some("older")),
+            Psidts::Rotated("first-value".into())
+        );
+    }
+
+    #[test]
+    fn rotation_wins_over_the_stale_entry_it_coexists_with() {
+        // The startup value is keyed by its Domain attribute; a replacement
+        // sent without one is keyed by the request host, so both are in the
+        // jar at once. Picking the first match would be a coin flip.
+        let jar = Jar::default();
+        jar.add(
+            "__Secure-1PSIDTS=stale-value; Domain=.google.com; Path=/; Secure",
+            COOKIE_ORIGIN,
+        );
+        jar.add(
+            "__Secure-1PSIDTS=fresh-value",
+            format!("{GEMINI_ORIGIN}/u/0/app"),
+        );
+        assert_eq!(
+            psidts_state(&jar, Some("stale-value")),
+            Psidts::Rotated("fresh-value".into()),
+            "the entry differing from the configured value is the only one that can be new"
+        );
     }
 }

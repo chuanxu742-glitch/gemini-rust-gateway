@@ -292,6 +292,36 @@ Windows 上，账号文件中的 Cookie 使用当前 Windows 用户绑定的 DPA
 
 此时账号会被标记为未就绪，`/v1/accounts` 会显示原因，重新同步一次 Cookie 即可恢复。
 
+### 观察轮换
+
+默认日志级别下，每次接住轮换都会记录一条：
+
+```text
+INFO absorbed a rotated __Secure-1PSIDTS from the provider account_id="default" length=..
+```
+
+Cookie 值本身永远不会进入日志，只记录长度，便于区分不同的值。
+
+想确认机制是否在正常检查（而不是从未触发），打开 debug 级别：
+
+```powershell
+$env:RUST_LOG = "gemini_rust_gateway=debug"
+```
+
+```bash
+RUST_LOG=gemini_rust_gateway=debug
+```
+
+此时每次检查都会输出结果，可区分三种状态：
+
+| 日志 | 含义 |
+| --- | --- |
+| `absorbed a rotated __Secure-1PSIDTS` | 发生轮换并已接住 |
+| `__Secure-1PSIDTS unchanged since the last check` | 检查过，本次未轮换 |
+| `no __Secure-1PSIDTS in the cookie jar` | 提供方从未下发过该 Cookie |
+
+第三种持续出现说明当前部署下不存在 Cookie 轮换，续期完全依赖 `__Secure-1PSID` 的有效期。
+
 ## 构建与测试
 
 建议分三层验证。第一层不连接 Google，适合每次改代码后运行。

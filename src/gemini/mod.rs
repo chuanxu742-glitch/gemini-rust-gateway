@@ -535,7 +535,7 @@ impl GeminiClient {
         }
         match self.persist_accounts().await {
             Ok(()) => {
-                tracing::info!(account_id = %account.id, "persisted rotated Gemini cookie");
+                tracing::debug!(account_id = %account.id, "persisted rotated Gemini cookie");
             }
             Err(error) => {
                 tracing::warn!(
@@ -808,19 +808,43 @@ impl AccountRuntime {
 
     /// Pull a rotated `__Secure-1PSIDTS` out of the jar into the account
     /// config. Returns whether the value actually changed.
+    ///
+    /// All three outcomes are logged so the rotation cadence can be observed
+    /// without guessing: an absent cookie means the provider never sent one,
+    /// which is not the same as a rotation that failed to be absorbed. The
+    /// value itself is never logged; its length is enough to tell rotations
+    /// apart and is safe to leave in a shared log.
     async fn absorb_rotated_cookie(&self) -> bool {
         let state = self.state.read().await.clone();
-        let Some(rotated) = session::rotated_psidts(
-            &state.jar,
-            &state.config.provider_origin,
-            state.config.secure_1psidts.as_deref(),
-        ) else {
-            return false;
-        };
-        let mut config = (*state.config).clone();
-        config.secure_1psidts = Some(rotated);
-        self.state.write().await.config = Arc::new(config);
-        true
+        let had_previous = state.config.secure_1psidts.is_some();
+        match session::psidts_state(&state.jar, state.config.secure_1psidts.as_deref()) {
+            session::Psidts::Absent => {
+                tracing::debug!(
+                    account_id = %self.id,
+                    "no __Secure-1PSIDTS in the cookie jar; the provider has not sent one"
+                );
+                false
+            }
+            session::Psidts::Unchanged => {
+                tracing::debug!(
+                    account_id = %self.id,
+                    "__Secure-1PSIDTS unchanged since the last check"
+                );
+                false
+            }
+            session::Psidts::Rotated(value) => {
+                tracing::info!(
+                    account_id = %self.id,
+                    length = value.len(),
+                    had_previous,
+                    "absorbed a rotated __Secure-1PSIDTS from the provider"
+                );
+                let mut config = (*state.config).clone();
+                config.secure_1psidts = Some(value);
+                self.state.write().await.config = Arc::new(config);
+                true
+            }
+        }
     }
 
     async fn credentials(&self) -> AccountCredentials {
