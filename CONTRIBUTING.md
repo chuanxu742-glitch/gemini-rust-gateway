@@ -11,6 +11,8 @@ Use Rust 1.85 or newer. On Windows, install MSYS2 UCRT64 and run:
 .\build.ps1 build -Release
 ```
 
+Windows builds must go through `build.ps1`; it locates MSYS2 and exports the toolchain variables BoringSSL needs. Calling cargo directly fails with `failed to find tool "gcc.exe"`.
+
 On Linux:
 
 ```bash

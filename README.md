@@ -14,7 +14,7 @@
 - OpenAI/Gemini function calling 兼容转换
 - SSE 流式聊天响应
 - 图片生成兼容接口 `/v1/images/generations`
-- 图片、音频、音乐、研究和 Canvas 异步任务
+- 图片、视频、音频、音乐、深度研究和 Canvas 异步任务
 - 有界队列、并发限制、超时与任务取消
 - SQLite WAL 任务持久化、分页查询、旧 JSON 自动迁移和过期产物清理
 - Prometheus 文本指标、健康与就绪检查
@@ -130,10 +130,14 @@ GEMINI_ACCOUNT_PROBE_SECONDS=60
 GEMINI_TASK_RETENTION_HOURS=168
 GEMINI_RETRY_ATTEMPTS=3
 GEMINI_RETRY_DELAY_MS=800
+# 六种异步任务默认全部启用；显式设置会覆盖默认值，未列出的类型将被关闭
+GEMINI_ENABLED_GENERATIONS=image,video,audio,music,deep_research,canvas
 # 未设置时自动读取 HTTPS_PROXY/ALL_PROXY；设为 direct 可明确禁用代理
 GEMINI_PROXY=
 GEMINI_COOKIE_SYNC_ENABLED=true
 ```
+
+`GEMINI_RETRY_ATTEMPTS` 只作用于可能因重试而改变结果的失败，例如上游错误、超时和网络故障。参数错误、认证失败以及没有可用账号属于确定性失败，会立即返回，不消耗重试预算。
 
 ## API 示例
 
@@ -218,6 +222,28 @@ curl http://127.0.0.1:8000/v1/tasks/<task_id> \
 | `GET` | `/files/...` | 访问生成产物 |
 | `POST` | `/admin/cookies/sync` | 验证、热更新并持久化本地 Cookie |
 | `PATCH`/`DELETE` | `/admin/accounts/{id}` | 调整账号权重、启停或删除账号 |
+
+## 错误语义
+
+错误响应统一为：
+
+```json
+{"error": {"message": "...", "type": "not_ready"}}
+```
+
+| 状态码 | `type` | 含义 |
+| --- | --- | --- |
+| `400` | `invalid_request` | 请求参数不合法，例如未知账号 ID、提示词为空或超长 |
+| `401` | `authentication_error` | API Key 或管理令牌不匹配 |
+| `403` | `feature_disabled` | 该生成类型未在 `GEMINI_ENABLED_GENERATIONS` 中启用 |
+| `404` | `not_found` | 任务不存在 |
+| `429` | `queue_full` | 任务队列已满 |
+| `502` | `provider_error` | Gemini 上游返回了错误或响应无法解析 |
+| `503` | `not_ready` | 网关本身无法服务：没有就绪账号、指定账号被停用或正在冷却 |
+| `504` | `timeout` | 上游请求超时 |
+| `500` | `gateway_error` | 内部错误；详情只写入日志，不返回给调用方 |
+
+`503` 与 `/readyz` 同义，表示本地状态问题，通常同步一次 Cookie 即可恢复；网关会立即返回，不消耗重试预算。`502` 表示上游确实失败，会先按 `GEMINI_RETRY_ATTEMPTS` 退避重试，全部失败后才返回。
 
 ## Chrome Cookie 同步
 
