@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Rust Gateway Cookie Sync",
+  "version": "0.4.0",
+  "description": "Securely sync Gemini Web session cookies to a local Gemini Rust Gateway.",
+  "permissions": ["alarms", "cookies", "storage"],
+  "host_permissions": [
+    "https://*.google.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "action": {
+    "default_title": "Gemini Cookie Sync",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

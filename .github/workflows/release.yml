@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-x86_64-${{ hashFiles('Cargo.lock') }}
+      - name: Install native build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang libclang-dev perl golang
+      - name: Build
+        run: cargo build --release --locked
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/gemini-rust-gateway-linux-x86_64
+          cp target/release/gemini-rust-gateway README.md CHANGELOG.md LICENSE .env.example .env.auth.example dist/gemini-rust-gateway-linux-x86_64/
+          cp -r chrome-extension scripts dist/gemini-rust-gateway-linux-x86_64/
+          tar -C dist -czf gemini-rust-gateway-linux-x86_64.tar.gz gemini-rust-gateway-linux-x86_64
+          sha256sum gemini-rust-gateway-linux-x86_64.tar.gz > gemini-rust-gateway-linux-x86_64.tar.gz.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-x86_64
+          path: gemini-rust-gateway-linux-x86_64.tar.gz*
+
+  build-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-arm64-${{ hashFiles('Cargo.lock') }}
+      - name: Install ARM64 cross build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build clang libclang-dev perl golang gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Install Rust target
+        run: rustup target add aarch64-unknown-linux-gnu
+      - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+        run: cargo build --release --locked --target aarch64-unknown-linux-gnu
+      - name: Package
+        run: |
+          mkdir -p dist/gemini-rust-gateway-linux-arm64
+          cp target/aarch64-unknown-linux-gnu/release/gemini-rust-gateway README.md CHANGELOG.md LICENSE .env.example .env.auth.example dist/gemini-rust-gateway-linux-arm64/
+          cp -r chrome-extension scripts dist/gemini-rust-gateway-linux-arm64/
+          tar -C dist -czf gemini-rust-gateway-linux-arm64.tar.gz gemini-rust-gateway-linux-arm64
+          sha256sum gemini-rust-gateway-linux-arm64.tar.gz > gemini-rust-gateway-linux-arm64.tar.gz.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-arm64
+          path: gemini-rust-gateway-linux-arm64.tar.gz*
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-x86_64-${{ hashFiles('Cargo.lock') }}
+      - name: Install GNU Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+          rustup default stable-x86_64-pc-windows-gnu
+      - name: Install MSYS2 build tools
+        shell: pwsh
+        run: C:\msys64\usr\bin\bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja perl"
+      - name: Build
+        shell: pwsh
+        run: .\build.ps1 build -Release
+      - name: Package
+        shell: pwsh
+        run: |
+          $dir = "dist\gemini-rust-gateway-windows-x86_64"
+          New-Item -ItemType Directory -Path $dir | Out-Null
+          Copy-Item target\release\gemini-rust-gateway.exe,README.md,CHANGELOG.md,LICENSE,.env.example,.env.auth.example,start.ps1 -Destination $dir
+          Copy-Item chrome-extension,scripts -Destination $dir -Recurse
+          Copy-Item C:\msys64\ucrt64\bin\libstdc++-6.dll,C:\msys64\ucrt64\bin\libgcc_s_seh-1.dll,C:\msys64\ucrt64\bin\libwinpthread-1.dll -Destination $dir
+          New-Item -ItemType Directory -Path "$dir\THIRD_PARTY_LICENSES\gcc-libs","$dir\THIRD_PARTY_LICENSES\winpthreads" | Out-Null
+          Copy-Item C:\msys64\ucrt64\share\licenses\gcc-libs\* -Destination "$dir\THIRD_PARTY_LICENSES\gcc-libs"
+          Copy-Item C:\msys64\ucrt64\share\licenses\winpthreads\* -Destination "$dir\THIRD_PARTY_LICENSES\winpthreads"
+          Compress-Archive -Path "$dir\*" -DestinationPath gemini-rust-gateway-windows-x86_64.zip
+          (Get-FileHash gemini-rust-gateway-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower() + "  gemini-rust-gateway-windows-x86_64.zip" | Set-Content gemini-rust-gateway-windows-x86_64.zip.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-x86_64
+          path: gemini-rust-gateway-windows-x86_64.zip*
+
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Generate SPDX SBOM
+        run: |
+          cargo install cargo-sbom --version 0.10.0 --locked
+          cargo sbom > gemini-rust-gateway.spdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom
+          path: gemini-rust-gateway.spdx.json
+
+  publish:
+    needs: [build-linux, build-linux-arm64, build-windows, sbom]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: dist/*
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --generate-notes --title "${GITHUB_REF_NAME}"

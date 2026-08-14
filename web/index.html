@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Gemini Rust Gateway 本地控制台">
+  <title>Gemini Rust Gateway</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Gemini Rust Gateway 首页">
+        <span class="brand-mark">R</span>
+        <span><strong>Gemini Gateway</strong><small>Native Rust Console</small></span>
+      </a>
+      <div class="top-actions">
+        <span id="service-state" class="status"><i></i>正在连接</span>
+        <button id="settings-button" class="button ghost" type="button">连接设置</button>
+      </div>
+    </header>
+
+    <section id="settings" class="settings" aria-label="连接设置">
+      <div class="field grow">
+        <label for="base-url">网关地址</label>
+        <input id="base-url" type="url" spellcheck="false">
+      </div>
+      <div class="field grow">
+        <label for="api-key">本地 API Key</label>
+        <input id="api-key" type="password" autocomplete="off" placeholder="粘贴 GEMINI_API_KEY">
+      </div>
+      <div class="field">
+        <label for="account-select">请求账号</label>
+        <select id="account-select"><option value="">自动轮换</option></select>
+      </div>
+      <div class="field grow">
+        <label for="admin-token">管理令牌（仅账号管理）</label>
+        <input id="admin-token" type="password" autocomplete="off" placeholder="GEMINI_ADMIN_TOKEN">
+      </div>
+      <label class="remember"><input id="remember-key" type="checkbox" checked> 在这个浏览器中记住</label>
+      <button id="save-settings" class="button primary" type="button">保存并检测</button>
+      <p>这里只保存网关 API Key；Google Cookie 始终留在服务端配置中，不会发送给前端。</p>
+    </section>
+
+    <nav class="tabs" aria-label="功能切换">
+      <button class="tab active" data-panel="chat" type="button">对话</button>
+      <button class="tab" data-panel="image" type="button">图片</button>
+      <button class="tab" data-panel="tasks" type="button">任务</button>
+      <button class="tab" data-panel="accounts" type="button">账号</button>
+    </nav>
+
+    <main>
+      <section id="panel-chat" class="panel active">
+        <div class="panel-head">
+          <div><span class="eyebrow">STREAMING CHAT</span><h1>和 Gemini 对话</h1></div>
+          <div class="inline-controls"><select id="chat-model" aria-label="聊天模型"></select><button id="clear-chat" class="button ghost" type="button">清空</button></div>
+        </div>
+        <div id="messages" class="messages" aria-live="polite">
+          <div class="empty-state"><span>✦</span><h2>Rust 网关已就绪</h2><p>输入消息即可验证流式聊天。历史仅保留在当前页面。</p></div>
+        </div>
+        <form id="chat-form" class="composer">
+          <textarea id="chat-input" rows="2" placeholder="输入消息，Enter 发送，Shift + Enter 换行" required></textarea>
+          <button id="send-chat" class="send" type="submit" aria-label="发送">↑</button>
+        </form>
+      </section>
+
+      <section id="panel-image" class="panel">
+        <div class="panel-head">
+          <div><span class="eyebrow">ASYNC GENERATION</span><h1>生成图片</h1><p>提交后自动轮询任务，结果会持久化到网关数据目录。</p></div>
+        </div>
+        <form id="image-form" class="generation-form">
+          <div class="field full"><label for="image-prompt">图片描述</label><textarea id="image-prompt" rows="5" placeholder="例如：雨夜上海街头，一辆复古电车穿过霓虹灯，电影感" required></textarea></div>
+          <div class="field"><label for="image-model">模型</label><select id="image-model"></select></div>
+          <div class="field small"><label for="image-count">数量</label><select id="image-count"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
+          <button id="generate-image" class="button primary tall" type="submit">开始生成</button>
+        </form>
+        <div id="image-progress" class="task-progress hidden"></div>
+        <div id="image-gallery" class="gallery"></div>
+      </section>
+
+      <section id="panel-tasks" class="panel">
+        <div class="panel-head"><div><span class="eyebrow">PERSISTED TASKS</span><h1>查询任务</h1><p>输入任务 ID，查看状态、产物或取消仍在执行的任务。</p></div></div>
+        <form id="task-form" class="lookup"><input id="task-id" placeholder="例如 9f03…" required><button class="button primary" type="submit">查询</button><button id="recent-tasks" class="button ghost" type="button">最近任务</button></form>
+        <div id="task-result" class="task-result empty">尚未查询任务</div>
+      </section>
+
+      <section id="panel-accounts" class="panel">
+        <div class="panel-head">
+          <div><span class="eyebrow">ACCOUNT POOL</span><h1>账号池</h1><p>查看健康状态、调整权重或暂停账号。新增和更新 Cookie 使用 Chrome 扩展。</p></div>
+          <button id="refresh-accounts" class="button ghost" type="button">刷新状态</button>
+        </div>
+        <div id="account-list" class="account-list"><div class="empty-state"><p>正在读取账号状态…</p></div></div>
+      </section>
+    </main>
+
+    <footer><span>Gemini Rust Gateway</span><span id="capability-summary">等待能力检测</span></footer>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

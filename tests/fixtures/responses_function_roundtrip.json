@@ -1,0 +1,8 @@
+{
+  "model": "gemini-3-flash",
+  "input": [
+    {"role": "user", "content": [{"type": "input_text", "text": "Weather in Paris?"}]},
+    {"type": "function_call", "call_id": "call_fixture", "name": "weather", "arguments": "{\"city\":\"Paris\"}"},
+    {"type": "function_call_output", "call_id": "call_fixture", "output": "sunny, 22 C"}
+  ]
+}

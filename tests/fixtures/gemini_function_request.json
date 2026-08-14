@@ -1,0 +1,10 @@
+{
+  "contents": [{"role": "user", "parts": [{"text": "Weather in Paris?"}]}],
+  "tools": [{
+    "functionDeclarations": [{
+      "name": "weather",
+      "description": "Get weather by city",
+      "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}
+    }]
+  }]
+}

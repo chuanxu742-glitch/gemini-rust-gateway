@@ -1,0 +1,13 @@
+/target/
+/gateway_data/
+/output/
+/.env
+/.env.*.local
+/.gemini.accounts.local.json
+/.gemini.accounts.local.json.bak
+/.gemini.accounts.local.json.new
+*.log
+*.part
+.DS_Store
+.idea/
+.vscode/
