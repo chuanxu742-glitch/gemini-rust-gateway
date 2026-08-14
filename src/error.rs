@@ -11,8 +11,8 @@ pub type Result<T> = std::result::Result<T, GatewayError>;
 /// Domain error type. Variants are split into two groups:
 ///
 /// - **User-facing** (`InvalidRequest`, `Auth`, `FeatureDisabled`, `TaskNotFound`,
-///   `QueueFull`, `Timeout`, `Provider`) carry messages that are safe to expose
-///   to API clients.
+///   `QueueFull`, `Timeout`, `NotReady`, `Provider`) carry messages that are safe
+///   to expose to API clients.
 /// - **Internal** (`Internal`) wraps infrastructure failures (IO, JSON,
 ///   upstream HTTP, dotenv). The display message is intentionally generic; the
 ///   underlying source is logged via `tracing` and never returned to the
@@ -31,6 +31,11 @@ pub enum GatewayError {
     QueueFull,
     #[error("provider request timed out")]
     Timeout,
+    /// The gateway cannot serve the request yet: no account is ready, the
+    /// selected account is disabled, or it is cooling down. This is local
+    /// state, not an upstream failure, so it maps to 503 like `/readyz`.
+    #[error("{0}")]
+    NotReady(String),
     #[error("provider error: {0}")]
     Provider(String),
     #[error("internal error")]
@@ -46,8 +51,23 @@ impl GatewayError {
             Self::TaskNotFound => (StatusCode::NOT_FOUND, "not_found"),
             Self::QueueFull => (StatusCode::TOO_MANY_REQUESTS, "queue_full"),
             Self::Timeout => (StatusCode::GATEWAY_TIMEOUT, "timeout"),
+            Self::NotReady(_) => (StatusCode::SERVICE_UNAVAILABLE, "not_ready"),
             Self::Provider(_) => (StatusCode::BAD_GATEWAY, "provider_error"),
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "gateway_error"),
+        }
+    }
+
+    /// Whether retrying the identical request could plausibly succeed.
+    /// Deterministic failures are surfaced immediately instead of spending the
+    /// retry budget re-deriving a known outcome.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::InvalidRequest(_)
+            | Self::Auth(_)
+            | Self::FeatureDisabled(_)
+            | Self::TaskNotFound
+            | Self::NotReady(_) => false,
+            Self::QueueFull | Self::Timeout | Self::Provider(_) | Self::Internal(_) => true,
         }
     }
 }
@@ -116,5 +136,32 @@ mod tests {
     fn user_error_preserves_message() {
         let error = GatewayError::InvalidRequest("prompt too long".into());
         assert_eq!(error.to_string(), "prompt too long");
+    }
+
+    #[test]
+    fn not_ready_maps_to_service_unavailable() {
+        // Local unreadiness must not be reported as an upstream failure, and it
+        // must agree with the status `/readyz` already returns.
+        let (status, kind) = GatewayError::NotReady("no account".into()).status_and_kind();
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(kind, "not_ready");
+
+        let (status, kind) = GatewayError::Provider("upstream broke".into()).status_and_kind();
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(kind, "provider_error");
+    }
+
+    #[test]
+    fn deterministic_errors_are_not_retryable() {
+        assert!(!GatewayError::NotReady("no account".into()).is_retryable());
+        assert!(!GatewayError::InvalidRequest("bad".into()).is_retryable());
+        assert!(!GatewayError::Auth("nope".into()).is_retryable());
+        assert!(!GatewayError::FeatureDisabled("off".into()).is_retryable());
+        assert!(!GatewayError::TaskNotFound.is_retryable());
+
+        assert!(GatewayError::Provider("upstream broke".into()).is_retryable());
+        assert!(GatewayError::Timeout.is_retryable());
+        assert!(GatewayError::QueueFull.is_retryable());
+        assert!(GatewayError::Internal(anyhow::anyhow!("io")).is_retryable());
     }
 }

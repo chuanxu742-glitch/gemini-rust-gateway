@@ -119,7 +119,7 @@ impl GeminiClient {
             Ok(client)
         } else {
             Err(last_error.unwrap_or_else(|| {
-                GatewayError::Provider(
+                GatewayError::NotReady(
                     "no Gemini account is ready; sync a Cookie from the Chrome extension".into(),
                 )
             }))
@@ -250,12 +250,20 @@ impl GeminiClient {
                         }
                     }
                     if let Some(error) = failed {
+                        if !error.is_retryable() {
+                            return Err(error);
+                        }
                         last_error = Some(error);
                     } else {
                         return Ok(output);
                     }
                 }
-                Err(error) => last_error = Some(error),
+                Err(error) => {
+                    if !error.is_retryable() {
+                        return Err(error);
+                    }
+                    last_error = Some(error);
+                }
             }
             if attempt + 1 < self.config.retry_attempts {
                 self.retry_delay(attempt).await;
@@ -430,7 +438,7 @@ impl GeminiClient {
             .filter(|account| self.is_available(account))
             .collect::<Vec<_>>();
         if eligible.is_empty() {
-            return Err(GatewayError::Provider(
+            return Err(GatewayError::NotReady(
                 "no healthy Gemini account is available; inspect /v1/accounts or sync cookies"
                     .into(),
             ));
@@ -460,13 +468,13 @@ impl GeminiClient {
 
     fn ensure_available(&self, account: &AccountRuntime) -> Result<()> {
         if !account.enabled.load(Ordering::Acquire) {
-            return Err(GatewayError::Provider(format!(
+            return Err(GatewayError::NotReady(format!(
                 "Gemini account '{}' is disabled",
                 account.id
             )));
         }
         if !account.ready.load(Ordering::Acquire) {
-            return Err(GatewayError::Provider(format!(
+            return Err(GatewayError::NotReady(format!(
                 "Gemini account '{}' is not ready; sync its cookies",
                 account.id
             )));
@@ -477,7 +485,7 @@ impl GeminiClient {
             .saturating_sub(now_millis())
             .div_ceil(1000);
         if remaining > 0 {
-            return Err(GatewayError::Provider(format!(
+            return Err(GatewayError::NotReady(format!(
                 "Gemini account '{}' is cooling down for {remaining}s",
                 account.id
             )));
@@ -873,6 +881,31 @@ mod tests {
         pool.set_ready(&default, true);
         pool.set_ready(&second, true);
         (root, pool)
+    }
+
+    #[tokio::test]
+    async fn unready_pool_fails_fast_without_burning_retries() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = (*test_config(root.path())).clone();
+        // Large enough that a single wasted retry would be unmistakable.
+        config.retry_delay = Duration::from_millis(500);
+        let pool = GeminiClient::degraded(Arc::new(config)).unwrap();
+
+        let started = std::time::Instant::now();
+        let error = pool
+            .generate("hello", "gemini-3-flash", 0)
+            .await
+            .expect_err("a degraded pool has no ready account");
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(error, GatewayError::NotReady(_)),
+            "expected NotReady, got {error:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(250),
+            "a known-unready pool retried instead of failing fast: {elapsed:?}"
+        );
     }
 
     #[test]

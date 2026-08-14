@@ -245,7 +245,9 @@ Windows 上，账号文件中的 Cookie 使用当前 Windows 用户绑定的 DPA
 
 ## 构建与测试
 
-建议分三层验证。第一层不连接 Google，适合每次改代码后运行：
+建议分三层验证。第一层不连接 Google，适合每次改代码后运行。
+
+Linux/macOS 直接使用 cargo：
 
 ```bash
 cargo fmt --check
@@ -253,7 +255,7 @@ cargo test --locked
 cargo build --release --locked
 ```
 
-Windows 可使用：
+Windows 必须通过 `build.ps1`，不能直接调用 cargo：
 
 ```powershell
 .\build.ps1 fmt
@@ -261,6 +263,14 @@ Windows 可使用：
 .\build.ps1 test
 .\build.ps1 build -Release
 ```
+
+目标三元组是 `x86_64-pc-windows-gnu`，BoringSSL 需要 MSYS2 UCRT64 的 GCC。`build.ps1` 负责定位 MSYS2 并注入 `ucrt64\bin`、`HOST_CC`、`HOST_CXX`、`LIBCLANG_PATH`。在没有这些环境变量的普通 PowerShell 里直接运行 `cargo test` 会在编译 BoringSSL 时失败：
+
+```text
+error occurred in cc-rs: failed to find tool "gcc.exe": program not found
+```
+
+出现这个错误说明绕过了 `build.ps1`，不是代码或依赖的问题。`.\build.ps1 fmt` 和 `.\build.ps1 clean` 不需要 MSYS2，其余子命令找不到 UCRT64 GCC 时会直接报错退出。
 
 Windows 的 Release 构建会把所需的 MSYS2 UCRT 运行库复制到 `target/release`；分发时请让这些 DLL 与 EXE 保持在同一目录。GitHub Release 压缩包已经包含它们。
 
