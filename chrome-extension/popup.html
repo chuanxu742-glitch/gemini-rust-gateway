@@ -4,8 +4,8 @@
 <body>
   <main>
     <header><span>R</span><div><strong>Cookie Sync</strong><small>Gemini Rust Gateway</small></div></header>
-    <label>本地网关地址<input id="gateway" value="http://127.0.0.1:8000" spellcheck="false"></label>
-    <label>管理令牌<input id="admin-token" type="password" autocomplete="off" placeholder="GEMINI_ADMIN_TOKEN"></label>
+    <label>本地网关地址<input id="gateway" value="http://127.0.0.1:8000" spellcheck="false"><small>同步前请先启动网关</small></label>
+    <label>管理令牌<input id="admin-token" type="password" autocomplete="off" placeholder="GEMINI_ADMIN_TOKEN"><small>见项目 .env 中的 GEMINI_ADMIN_TOKEN，由 init 生成</small></label>
     <label class="check"><input id="remember-token" type="checkbox"> 在浏览器中长期记住管理令牌</label>
     <label>账号名称<input id="account-id" value="default" maxlength="64" spellcheck="false" placeholder="例如 work、personal"></label>
     <label>Google 账号序号<input id="auth-user" type="number" min="0" max="20" value="0"></label>
@@ -14,8 +14,8 @@
     <button id="sync" type="button">验证并同步</button>
     <button id="sync-all" class="secondary" type="button">立即同步全部账号</button>
     <div id="accounts" class="accounts"></div>
-    <p id="status">请先在 gemini.google.com 登录目标账号。</p>
-    <aside>每个账号会独立保存和轮换。Cookie 只会发送到 127.0.0.1 或 localhost，不会上传到第三方服务器。</aside>
+    <p id="status">请先启动网关，并在 gemini.google.com 登录目标账号。</p>
+    <aside>Cookie 在同步时从浏览器自动读取，无需手动填写，也不需要从开发者工具复制。Cookie 只会发送到 127.0.0.1 或 localhost，不会上传到第三方服务器。每个账号会独立保存和轮换。</aside>
   </main>
   <script src="popup.js"></script>
 </body>

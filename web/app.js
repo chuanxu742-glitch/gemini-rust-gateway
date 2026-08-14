@@ -39,7 +39,7 @@
   }
   async function requestAdmin(path, options = {}) {
     const token = adminTokenInput.value.trim();
-    if (!token) throw new Error("请先在连接设置中填写管理令牌");
+    if (!token) throw new Error("请先在连接设置中填写管理令牌（.env 中的 GEMINI_ADMIN_TOKEN）");
     return request(path, { ...options, headers: { ...options.headers, Authorization: `Bearer ${token}` } });
   }
   function setService(text, kind = "") { const node = $("#service-state"); node.className = `status ${kind}`; node.innerHTML = "<i></i>"; node.append(document.createTextNode(text)); }

@@ -40,7 +40,7 @@
       </div>
       <label class="remember"><input id="remember-key" type="checkbox" checked> 在这个浏览器中记住</label>
       <button id="save-settings" class="button primary" type="button">保存并检测</button>
-      <p>这里只保存网关 API Key；Google Cookie 始终留在服务端配置中，不会发送给前端。</p>
+      <p>API Key 和管理令牌均由 <code>init</code> 生成，见项目 <code>.env</code> 中的 <code>GEMINI_API_KEY</code> 与 <code>GEMINI_ADMIN_TOKEN</code>。这里只保存网关 API Key；Google Cookie 始终留在服务端配置中，不会发送给前端。</p>
     </section>
 
     <nav class="tabs" aria-label="功能切换">

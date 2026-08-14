@@ -7,6 +7,10 @@
 - Documented that Windows builds must go through `build.ps1`, including the BoringSSL `gcc.exe` error produced by calling cargo directly.
 - Documented the error response contract, including which status codes are retried.
 - Corrected the documented generation types: `video` is implemented and enabled by default, but was missing from the README feature list and from `.env.example`, so copying the sample configuration silently disabled it.
+- Told users where the admin token comes from, in the Chrome extension, the embedded console and both READMEs. The inputs previously echoed the variable name back without saying that `init` generates it into `.env`.
+- Stated that the extension reads cookies from the browser automatically, which nothing in the UI or docs previously mentioned.
+- Replaced the browser's `Failed to fetch` with a message naming the real cause, that the gateway is not running, and reported a rejected admin token as such instead of a bare `401`.
+- Documented that the gateway must be running before syncing, as a prerequisite rather than an incidental first step.
 
 ## 0.4.0
 

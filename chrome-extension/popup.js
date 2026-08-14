@@ -49,6 +49,20 @@ async function getCookie(name) {
     cookies.find((cookie) => cookie.domain.endsWith("google.com"));
 }
 
+// A failed fetch here almost always means the gateway is not running, but the
+// browser only reports "Failed to fetch", which points nowhere useful.
+async function postSync(gateway, adminToken, payload) {
+  try {
+    return await fetch(`${gateway}/admin/cookies/sync`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${adminToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  } catch {
+    throw new Error(`无法连接 ${gateway}，请先启动网关后重试`);
+  }
+}
+
 $("sync").addEventListener("click", async () => {
   const button = $("sync");
   const status = $("status");
@@ -75,18 +89,15 @@ $("sync").addEventListener("click", async () => {
       getCookie("__Secure-1PSIDTS")
     ]);
     if (!psid?.value) throw new Error("没有找到 __Secure-1PSID，请先登录 Gemini Web");
-    const response = await fetch(`${gateway}/admin/cookies/sync`, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${adminToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        account_id: id,
-        auth_user: authUser,
-        weight,
-        secure_1psid: psid.value,
-        secure_1psidts: psidts?.value || null
-      })
+    const response = await postSync(gateway, adminToken, {
+      account_id: id,
+      auth_user: authUser,
+      weight,
+      secure_1psid: psid.value,
+      secure_1psidts: psidts?.value || null
     });
     const data = await response.json().catch(() => ({}));
+    if (response.status === 401) throw new Error("管理令牌不正确，请核对 .env 中的 GEMINI_ADMIN_TOKEN");
     if (!response.ok) throw new Error(data?.error?.message || `${response.status} ${response.statusText}`);
 
     const saved = await chrome.storage.local.get("accounts");

@@ -247,13 +247,20 @@ curl http://127.0.0.1:8000/v1/tasks/<task_id> \
 
 ## Chrome Cookie 同步
 
-项目自带 [`chrome-extension`](chrome-extension) 扩展：
+项目自带 [`chrome-extension`](chrome-extension) 扩展。**Cookie 由扩展从浏览器自动读取，不需要手动复制或粘贴**；扩展中要填的只是网关地址和账号归属信息。
+
+开始前请确认两个前置条件，否则同步一定失败：
+
+- **网关正在运行**。扩展会向 `http://127.0.0.1:8000/admin/cookies/sync` 发请求，网关未启动时浏览器只会报 `Failed to fetch`。
+- **浏览器已登录目标 Google 账号**，即扩展能在 `google.com` 域下读到 `__Secure-1PSID`。
+
+然后：
 
 1. 使用 `init` 生成的本地配置启动网关；本地初始化默认开启 Cookie 同步。
 2. Chrome 打开 `chrome://extensions`，启用开发者模式。
 3. 点击“加载已解压的扩展程序”，选择 `chrome-extension` 目录。
 4. 登录对应的 `https://gemini.google.com/u/0/app`。
-5. 在扩展中填写 `GEMINI_ADMIN_TOKEN`、稳定的账号名称和账号序号，点击同步。
+5. 在扩展中填写管理令牌（即 `init` 写入 `.env` 的 `GEMINI_ADMIN_TOKEN`）、稳定的账号名称和账号序号，点击同步。
 
 扩展只允许连接 `127.0.0.1` 或 `localhost`。网关会先在线验证 Cookie，成功后才加入账号池，并原子写入 `GEMINI_ACCOUNTS_FILE`。管理令牌与普通 API Key 分离；未配置 `GEMINI_ADMIN_TOKEN` 的旧环境会暂时回退到 API Key。启用自动同步并允许记住管理令牌后，扩展每 30 分钟刷新所有已保存账号；不开启时仍可手动同步。
 

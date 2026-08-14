@@ -29,20 +29,26 @@ async function syncAll(force = false) {
   const results = [];
   for (const account of saved.accounts) {
     try {
-      const response = await fetch(`${gateway}/admin/cookies/sync`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${saved.adminToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          account_id: account.id,
-          auth_user: account.authUser,
-          weight: account.weight || 1,
-          secure_1psid: psid.value,
-          secure_1psidts: psidts?.value || null
-        })
-      });
+      let response;
+      try {
+        response = await fetch(`${gateway}/admin/cookies/sync`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${saved.adminToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            account_id: account.id,
+            auth_user: account.authUser,
+            weight: account.weight || 1,
+            secure_1psid: psid.value,
+            secure_1psidts: psidts?.value || null
+          })
+        });
+      } catch {
+        throw new Error(`无法连接 ${gateway}，网关可能未运行`);
+      }
+      if (response.status === 401) throw new Error("管理令牌不正确");
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       results.push({ id: account.id, ok: true });
     } catch (error) {
