@@ -32,7 +32,7 @@ jobs:
           cp -r chrome-extension scripts dist/gemini-rust-gateway-linux-x86_64/
           tar -C dist -czf gemini-rust-gateway-linux-x86_64.tar.gz gemini-rust-gateway-linux-x86_64
           sha256sum gemini-rust-gateway-linux-x86_64.tar.gz > gemini-rust-gateway-linux-x86_64.tar.gz.sha256
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-x86_64
           path: gemini-rust-gateway-linux-x86_64.tar.gz*
@@ -65,7 +65,7 @@ jobs:
           cp -r chrome-extension scripts dist/gemini-rust-gateway-linux-arm64/
           tar -C dist -czf gemini-rust-gateway-linux-arm64.tar.gz gemini-rust-gateway-linux-arm64
           sha256sum gemini-rust-gateway-linux-arm64.tar.gz > gemini-rust-gateway-linux-arm64.tar.gz.sha256
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-arm64
           path: gemini-rust-gateway-linux-arm64.tar.gz*
@@ -105,7 +105,7 @@ jobs:
           Copy-Item C:\msys64\ucrt64\share\licenses\winpthreads\* -Destination "$dir\THIRD_PARTY_LICENSES\winpthreads"
           Compress-Archive -Path "$dir\*" -DestinationPath gemini-rust-gateway-windows-x86_64.zip
           (Get-FileHash gemini-rust-gateway-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower() + "  gemini-rust-gateway-windows-x86_64.zip" | Set-Content gemini-rust-gateway-windows-x86_64.zip.sha256
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-x86_64
           path: gemini-rust-gateway-windows-x86_64.zip*
@@ -118,7 +118,7 @@ jobs:
         run: |
           cargo install cargo-sbom --version 0.10.0 --locked
           cargo sbom > gemini-rust-gateway.spdx.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom
           path: gemini-rust-gateway.spdx.json
