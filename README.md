@@ -1,44 +1,65 @@
 # Gemini Rust Gateway
 
-一个不依赖 Python 运行时的原生 Rust Gemini Web 网关，提供 OpenAI 兼容聊天接口、流式输出、图片生成和持久化异步任务。
+[![CI](https://github.com/chuanxu742-glitch/gemini-rust-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/chuanxu742-glitch/gemini-rust-gateway/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/chuanxu742-glitch/gemini-rust-gateway?display_name=tag&sort=semver)](https://github.com/chuanxu742-glitch/gemini-rust-gateway/releases)
+[![Rust 1.85+](https://img.shields.io/badge/Rust-1.85%2B-orange?logo=rust)](https://www.rust-lang.org/)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+
+一个纯 Rust 的 Gemini Web API 网关。它把 Gemini Web 会话转换为 OpenAI Chat、OpenAI Responses 和 Gemini `generateContent` 风格接口，同时提供多账号轮换、图片生成、异步任务、内嵌控制台和 Chrome Cookie 同步。
+
+不需要 Python、Node.js 或外部数据库运行服务；下载对应平台的发布包即可启动。
 
 > [!IMPORTANT]
-> 本项目不是 Google 官方 SDK，依赖 Gemini Web 的非公开协议，Google 更新网页协议后可能需要同步适配。请仅在你有权使用的账号和环境中运行，并遵守相关服务条款。
+> 本项目不是 Google 官方 SDK，依赖 Gemini Web 的非公开协议。网页协议变化可能导致接口暂时不可用。请仅在你有权使用的账号和环境中运行，并遵守 Google 的服务条款。
 
-## 特性
+## 功能概览
 
-- Rust 2024、Axum、Tokio 异步运行时
-- OpenAI 风格的 `/v1/chat/completions`
-- OpenAI Responses API `/v1/responses`，支持 Codex 风格输入和流式事件
-- Gemini API `/v1beta/models/*:generateContent` 与 `streamGenerateContent`
-- OpenAI/Gemini function calling 兼容转换
-- SSE 流式聊天响应
-- 图片生成兼容接口 `/v1/images/generations`
-- 图片、视频、音频、音乐、深度研究和 Canvas 异步任务
-- 有界队列、并发限制、超时与任务取消
-- SQLite WAL 任务持久化、分页查询、旧 JSON 自动迁移和过期产物清理
-- Prometheus 文本指标、健康与就绪检查
-- 使用 `wreq`/BoringSSL 模拟浏览器 TLS 指纹
-- 内嵌 Web 控制台，无需 Node.js，可直接测试聊天、图片和任务
-- Gemini Web BL/会话元数据自动刷新、有界指数退避重试
-- 自动吸收并持久化 Google 轮换的 `__Secure-1PSIDTS`，无需浏览器参与
-- 多账号隔离、`/u/0`/`/u/1` 路径、健康轮换与故障转移
-- Chrome Cookie 同步扩展（支持定时自动同步）和 `HTTPS_PROXY`/`ALL_PROXY` 环境变量
-- Windows DPAPI Cookie 加密、独立管理令牌和账号后台健康恢复
+| 能力 | 状态 | 接口 |
+| --- | --- | --- |
+| OpenAI Chat Completions | ✅ 普通与 SSE 流式响应 | `POST /v1/chat/completions` |
+| OpenAI Responses API | ✅ Codex/新版客户端兼容格式 | `POST /v1/responses` |
+| Gemini API | ✅ `generateContent` 与 SSE 流式响应 | `POST /v1beta/models/...` |
+| Function/Tool Calling | ✅ OpenAI 与 Gemini 格式转换 | Chat、Responses、Gemini API |
+| 图片生成 | ✅ 同步接口与异步任务 | `/v1/images/generations`、`/v1/generations` |
+| 其他生成任务 | ✅ 视频、音频、音乐、深度研究、Canvas | `POST /v1/generations` |
+| 多账号 | ✅ 隔离、权重、冷却、故障转移、固定账号 | `/v1/accounts`、`X-Gemini-Account` |
+| 本地管理界面 | ✅ 编译进二进制，无前端运行时依赖 | `GET /` |
+| Cookie 同步 | ✅ Chrome 手动/定时同步多个 Google 账号 | `chrome-extension/` |
+| 任务持久化 | ✅ SQLite WAL、迁移、分页和保留期清理 | `gateway_data/tasks.sqlite3` |
+| 可观测性 | ✅ 健康检查、就绪检查和 Prometheus 指标 | `/healthz`、`/readyz`、`/metrics` |
+
+## 工作方式
+
+```mermaid
+flowchart LR
+    Client["OpenAI / Gemini 客户端"] --> Gateway["Axum API 网关"]
+    Console["内嵌 Web 控制台"] --> Gateway
+    Extension["Chrome Cookie 同步"] --> Admin["本地管理接口"]
+    Admin --> Pool["隔离账号池"]
+    Gateway --> Pool
+    Pool --> A0["Google /u/0 会话"]
+    Pool --> A1["Google /u/1 会话"]
+    A0 --> Gemini["Gemini Web"]
+    A1 --> Gemini
+    Gateway --> Queue["异步任务队列"]
+    Queue --> SQLite["SQLite + 本地产物"]
+```
+
+每个 Google 账号拥有独立的 Cookie Jar、HTTP Client、会话元数据、并发限制和健康状态。默认路由会综合在途请求数、账号权重和冷却状态；也可以通过 `X-Gemini-Account` 固定账号。
 
 ## 快速开始
 
-### Windows：下载即用
+### Windows 发布包
 
-从 GitHub Releases 下载 `gemini-rust-gateway-windows-x86_64.zip`，解压后运行：
+从 [GitHub Releases](https://github.com/chuanxu742-glitch/gemini-rust-gateway/releases) 下载 `gemini-rust-gateway-windows-x86_64.zip`，完整解压后运行：
 
 ```powershell
 .\start.ps1
 ```
 
-首次启动可隐藏输入 Cookie，也可以直接按 Enter，启动后通过 Chrome 扩展自动同步。程序会生成本地 API Key 并保存配置，后续运行不再重复填写。
+首次运行会生成本地 API Key 和独立管理令牌，创建 `.env` 与 `.env.auth.local`，并可选隐藏输入 Gemini Cookie。后续直接启动，不再重复填写配置。
 
-也可以直接使用命令：
+也可以分步执行：
 
 ```powershell
 .\gemini-rust-gateway.exe init
@@ -46,46 +67,48 @@
 .\gemini-rust-gateway.exe serve
 ```
 
-### Linux：预编译包
+默认控制台地址为 [http://127.0.0.1:8000](http://127.0.0.1:8000)。
 
-下载 `gemini-rust-gateway-linux-x86_64.tar.gz` 并解压：
+> Windows 发布包中的 EXE 需要同目录内的三个 UCRT DLL。请完整解压 ZIP，不要只复制 EXE。
+
+### Linux 发布包
 
 ```bash
+tar -xzf gemini-rust-gateway-linux-x86_64.tar.gz
+cd gemini-rust-gateway-linux-x86_64
 ./gemini-rust-gateway init
 ./gemini-rust-gateway doctor --online
 ./gemini-rust-gateway serve
 ```
 
+发布工作流提供 Linux x86_64、Linux ARM64 和 Windows x86_64 包，并生成 SHA-256、SPDX SBOM 与构建证明。
+
 ### Docker Compose
 
-先使用预编译二进制或源码执行一次 `init`，然后运行：
-
 ```bash
+cp .env.example .env
+cp .env.auth.example .env.auth.local
 docker compose up -d --build
 ```
 
-容器部署也支持完全通过环境变量或 Secret Manager 注入配置，不强制要求 `.env` 文件。
+启动前请在 `.env` 更换 API Key 和管理令牌。然后选择一种登录方式：在 `.env.auth.local` 填入自己的 Cookie；或者设置 `GEMINI_COOKIE_SYNC_ENABLED=true`，等容器启动后使用 Chrome 扩展同步。
+
+Compose 默认只映射到宿主机 `127.0.0.1:8000`，数据保存在 `gateway-data` volume。生产环境建议使用 Secret Manager 注入凭据，并在前方配置 HTTPS 反向代理。
 
 ### 从源码构建
 
 需要 Rust 1.85 或更高版本。
-
-```bash
-cargo run -- init
-cargo run --release -- serve
-```
-
-`init` 会创建 `.env` 和 `.env.auth.local`。登录凭据只进入被 Git 忽略的 `.env.auth.local`。
 
 Linux：
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y build-essential cmake ninja-build clang libclang-dev perl golang
+cargo run -- init
 cargo run --release -- serve
 ```
 
-Windows 源码构建前可检查依赖：
+Windows 使用项目脚本准备 BoringSSL/MSYS2 UCRT64 工具链：
 
 ```powershell
 .\scripts\check-build.ps1
@@ -93,56 +116,43 @@ Windows 源码构建前可检查依赖：
 .\build.ps1 run -Release serve
 ```
 
-脚本会依次查找 `$env:GEMINI_MSYS2_ROOT`、`$env:MSYS2_ROOT`、用户目录下的 `.cargo\msys64` 和 `C:\msys64`。
+Windows 不建议绕过 `build.ps1` 直接执行 Cargo。脚本负责定位 MSYS2、设置 GCC/CMake/libclang，并在 Release 构建后复制运行库 DLL。
 
-默认监听 `http://127.0.0.1:8000`。除健康检查外，请求需要携带：
+## Cookie 配置与 Chrome 扩展
+
+网关需要 Gemini Web 登录会话，不使用 Google AI Studio API Key。推荐使用仓库自带的 [`chrome-extension`](chrome-extension/README.md) 完成首次同步：
+
+1. 启动网关，确认 `.env` 中 `GEMINI_COOKIE_SYNC_ENABLED=true`；
+2. Chrome 打开 `chrome://extensions` 并启用开发者模式；
+3. 选择“加载已解压的扩展程序”，指向 `chrome-extension`；
+4. 浏览器登录 `https://gemini.google.com/u/0/app`；
+5. 在扩展中填写 `GEMINI_ADMIN_TOKEN`、账号名称、`/u/N` 序号和权重；
+6. 点击同步，也可以启用每 30 分钟自动同步。
+
+扩展不是服务运行时依赖。它只负责首次注入浏览器登录态、会话彻底失效后的重新授权，以及网关长期空闲时定时同步最新 Cookie。
+
+正常请求过程中，网关会吸收 Google 通过 `Set-Cookie` 轮换的新 `__Secure-1PSIDTS` 并持久化，因此 Docker 和无浏览器部署也能自行续期。
+
+扩展只允许连接 `127.0.0.1` 或 `localhost`。管理接口默认也只接受本机来源；确有反向代理或容器需求时才应设置 `GEMINI_REMOTE_ADMIN_ENABLED=true`。
+
+### 凭据存储
+
+- Windows：账号文件中的 Cookie 使用当前 Windows 用户绑定的 DPAPI 加密；
+- Linux/macOS：账号文件权限限制为 `0600`；
+- Cookie 不进入任务记录、普通 API 响应或日志；
+- `.env`、`.env.auth.local`、账号文件和数据目录均已被 Git 忽略。
+
+## API 调用
+
+除健康检查和内嵌静态页面外，API 请求需要本地令牌：
 
 ```text
 Authorization: Bearer <GEMINI_API_KEY>
 ```
 
-启动后直接打开 [http://127.0.0.1:8000](http://127.0.0.1:8000)。首次在控制台填写本地 API Key 后，可选择保存在浏览器中；Google Cookie 不会进入前端。
+Gemini 风格客户端也可以使用 `x-goog-api-key: <GEMINI_API_KEY>`。
 
-## 配置命令
-
-```text
-gemini-rust-gateway init [--force] [--non-interactive]
-gemini-rust-gateway doctor [--online]
-gemini-rust-gateway serve
-```
-
-- `init`：隐藏输入 Cookie，自动生成 API Key，并持久化本机配置。
-- `init --non-interactive`：从环境变量读取凭据，适用于自动部署。
-- `doctor`：检查配置、数据目录和监听端口。
-- `doctor --online`：额外连接 Gemini，验证 Cookie 是否真实可用。
-- 不带子命令与 `serve` 等价，兼容原来的启动方式。
-
-配置优先级为：进程环境变量 > `.env.auth.local` > `.env` > 内置默认值。
-
-常用兼容性配置：
-
-```dotenv
-GEMINI_AUTH_USER=0
-GEMINI_ADMIN_TOKEN=change-me-admin-token
-GEMINI_ACCOUNTS_FILE=gateway_data/accounts.local.json
-GEMINI_MAX_ACCOUNT_CONCURRENCY=1
-GEMINI_ACCOUNT_COOLDOWN_SECONDS=60
-GEMINI_ACCOUNT_PROBE_SECONDS=60
-GEMINI_TASK_RETENTION_HOURS=168
-GEMINI_RETRY_ATTEMPTS=3
-GEMINI_RETRY_DELAY_MS=800
-# 六种异步任务默认全部启用；显式设置会覆盖默认值，未列出的类型将被关闭
-GEMINI_ENABLED_GENERATIONS=image,video,audio,music,deep_research,canvas
-# 未设置时自动读取 HTTPS_PROXY/ALL_PROXY；设为 direct 可明确禁用代理
-GEMINI_PROXY=
-GEMINI_COOKIE_SYNC_ENABLED=true
-```
-
-`GEMINI_RETRY_ATTEMPTS` 只作用于可能因重试而改变结果的失败，例如上游错误、超时和网络故障。参数错误、认证失败以及没有可用账号属于确定性失败，会立即返回，不消耗重试预算。
-
-## API 示例
-
-聊天：
+### Chat Completions
 
 ```bash
 curl http://127.0.0.1:8000/v1/chat/completions \
@@ -151,18 +161,31 @@ curl http://127.0.0.1:8000/v1/chat/completions \
   -d '{"model":"gemini-3-flash","messages":[{"role":"user","content":"你好"}]}'
 ```
 
-流式聊天只需在请求体中添加 `"stream": true`。
+添加 `"stream": true` 即可获得 SSE 流式响应。
 
-Responses API：
+### Responses API
 
 ```bash
 curl http://127.0.0.1:8000/v1/responses \
   -H "Authorization: Bearer change-me-local-key" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gemini-3-flash","input":"你好","stream":false}'
+  -d '{"model":"gemini-3-flash","input":"用一句话解释 Rust 所有权","stream":false}'
 ```
 
-Gemini 原生 API：
+OpenAI SDK 的基础地址指向本地网关即可：
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="change-me-local-key",
+    base_url="http://127.0.0.1:8000/v1",
+)
+response = client.responses.create(model="gemini-3-flash", input="你好")
+print(response.output_text)
+```
+
+### Gemini generateContent
 
 ```bash
 curl "http://127.0.0.1:8000/v1beta/models/gemini-3-flash:generateContent" \
@@ -171,9 +194,7 @@ curl "http://127.0.0.1:8000/v1beta/models/gemini-3-flash:generateContent" \
   -d '{"contents":[{"role":"user","parts":[{"text":"你好"}]}]}'
 ```
 
-Chat、Responses 和 Gemini `functionDeclarations` 均可传递函数定义。网关使用严格 JSON 提示转换 Gemini Web 文本输出，返回对应的 `tool_calls`、`function_call` 或 `functionCall`；函数由客户端执行，再把结果传回下一轮。
-
-图片生成：
+### 图片与异步任务
 
 ```bash
 curl http://127.0.0.1:8000/v1/images/generations \
@@ -182,220 +203,150 @@ curl http://127.0.0.1:8000/v1/images/generations \
   -d '{"model":"gemini-3-flash","prompt":"A matte red cube on a white background","n":1}'
 ```
 
-提交异步任务：
+异步任务适合耗时更长的生成类型：
 
 ```bash
 curl http://127.0.0.1:8000/v1/generations \
   -H "Authorization: Bearer change-me-local-key" \
   -H "Content-Type: application/json" \
   -d '{"type":"image","prompt":"A cinematic orange cat astronaut"}'
-```
 
-使用返回的任务 ID 查询：
-
-```bash
 curl http://127.0.0.1:8000/v1/tasks/<task_id> \
   -H "Authorization: Bearer change-me-local-key"
 ```
 
-更多调用方式见 [`examples/client.rs`](examples/client.rs) 和 [`examples/client.ts`](examples/client.ts)。
+更多示例见 [`examples/client.rs`](examples/client.rs) 和 [`examples/client.ts`](examples/client.ts)。
 
-## 端点
+## 多账号隔离与轮换
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `GET` | `/` | 内嵌 Web 控制台 |
-| `GET` | `/health`、`/healthz` | 健康检查 |
-| `GET` | `/readyz` | Gemini 会话就绪检查 |
-| `GET` | `/metrics` | Prometheus 文本指标 |
-| `GET` | `/v1/models` | 模型列表 |
-| `GET` | `/v1/capabilities` | 网关能力列表 |
-| `GET` | `/v1/accounts` | 脱敏账号状态和轮换信息 |
-| `POST` | `/v1/chat/completions` | 普通或流式聊天 |
-| `POST` | `/v1/responses` | OpenAI Responses API |
-| `GET` | `/v1beta/models` | Gemini API 模型列表 |
-| `POST` | `/v1beta/models/{model}:generateContent` | Gemini API 内容生成 |
-| `POST` | `/v1beta/models/{model}:streamGenerateContent` | Gemini API SSE 内容生成 |
-| `POST` | `/v1/images/generations` | 同步等待图片生成 |
-| `POST` | `/v1/generations` | 提交异步生成任务 |
-| `GET` | `/v1/tasks` | 分页查询最近任务，可按状态过滤 |
-| `GET`/`DELETE` | `/v1/tasks/{id}` | 查询或取消任务 |
-| `GET` | `/files/...` | 访问生成产物 |
-| `POST` | `/admin/cookies/sync` | 验证、热更新并持久化本地 Cookie |
-| `PATCH`/`DELETE` | `/admin/accounts/{id}` | 调整账号权重、启停或删除账号 |
+同步每个账号时指定稳定的账号 ID、Google `/u/N` 序号和权重。网关会自动：
 
-## 错误语义
+- 在健康账号中按“最少在途请求 + 权重轮换”选择账号；
+- 对 429、网络错误和上游临时错误执行有界重试与故障转移；
+- 让限流账号进入冷却，并通过后台探针自动恢复；
+- 将 401/403 账号标记为未就绪，等待重新同步；
+- 让异步任务始终绑定入队时选择的账号。
 
-错误响应统一为：
-
-```json
-{"error": {"message": "...", "type": "not_ready"}}
-```
-
-| 状态码 | `type` | 含义 |
-| --- | --- | --- |
-| `400` | `invalid_request` | 请求参数不合法，例如未知账号 ID、提示词为空或超长 |
-| `401` | `authentication_error` | API Key 或管理令牌不匹配 |
-| `403` | `feature_disabled` | 该生成类型未在 `GEMINI_ENABLED_GENERATIONS` 中启用 |
-| `404` | `not_found` | 任务不存在 |
-| `429` | `queue_full` | 任务队列已满 |
-| `502` | `provider_error` | Gemini 上游返回了错误或响应无法解析 |
-| `503` | `not_ready` | 网关本身无法服务：没有就绪账号、指定账号被停用或正在冷却 |
-| `504` | `timeout` | 上游请求超时 |
-| `500` | `gateway_error` | 内部错误；详情只写入日志，不返回给调用方 |
-
-`503` 与 `/readyz` 同义，表示本地状态问题，通常同步一次 Cookie 即可恢复；网关会立即返回，不消耗重试预算。`502` 表示上游确实失败，会先按 `GEMINI_RETRY_ATTEMPTS` 退避重试，全部失败后才返回。
-
-## Chrome Cookie 同步
-
-扩展负责的是**首次注入凭据**，以及会话彻底失效后的重新授权。日常续期不依赖它：`__Secure-1PSIDTS` 由 Google 定期轮换并通过 `Set-Cookie` 下发，网关会在请求成功时接住新值并写回账号文件，因此 Docker 或无浏览器的服务器部署同样可以长期自维持。详见[会话续期](#会话续期)。
-
-项目自带 [`chrome-extension`](chrome-extension) 扩展。**Cookie 由扩展从浏览器自动读取，不需要手动复制或粘贴**；扩展中要填的只是网关地址和账号归属信息。
-
-开始前请确认两个前置条件，否则同步一定失败：
-
-- **网关正在运行**。扩展会向 `http://127.0.0.1:8000/admin/cookies/sync` 发请求，网关未启动时浏览器只会报 `Failed to fetch`。
-- **浏览器已登录目标 Google 账号**，即扩展能在 `google.com` 域下读到 `__Secure-1PSID`。
-
-然后：
-
-1. 使用 `init` 生成的本地配置启动网关；本地初始化默认开启 Cookie 同步。
-2. Chrome 打开 `chrome://extensions`，启用开发者模式。
-3. 点击“加载已解压的扩展程序”，选择 `chrome-extension` 目录。
-4. 登录对应的 `https://gemini.google.com/u/0/app`。
-5. 在扩展中填写管理令牌（即 `init` 写入 `.env` 的 `GEMINI_ADMIN_TOKEN`）、稳定的账号名称和账号序号，点击同步。
-
-扩展只允许连接 `127.0.0.1` 或 `localhost`。网关会先在线验证 Cookie，成功后才加入账号池，并原子写入 `GEMINI_ACCOUNTS_FILE`。管理令牌与普通 API Key 分离；未配置 `GEMINI_ADMIN_TOKEN` 的旧环境会暂时回退到 API Key。启用自动同步并允许记住管理令牌后，扩展每 30 分钟刷新所有已保存账号；不开启时仍可手动同步。
-
-每个账号拥有独立 Cookie Jar、HTTP Client、BL/会话元数据、并发限制和健康状态。未指定账号时，网关在健康账号中使用“最少在途请求 + 轮询”；429 会进入冷却，401/403 会下线到重新同步为止。需要固定账号时，在 Chat、Responses、Gemini v1beta 或生成任务请求中添加：
+需要固定账号时添加请求头：
 
 ```text
 X-Gemini-Account: work
 ```
 
-异步任务会在入队时绑定账号，任务状态和结果只记录 `account_id`，不会记录 Cookie。已有单账号 `GEMINI_SECURE_1PSID` 配置会自动作为 `default` 账号加载。
+账号状态可通过 `GET /v1/accounts` 或内嵌控制台查看。管理令牌可以启停账号、修改权重或删除账号。
 
-Windows 上，账号文件中的 Cookie 使用当前 Windows 用户绑定的 DPAPI 加密；复制到其他用户或机器后无法解密。Linux/macOS 使用权限为 `0600` 的本地文件，容器部署建议通过受保护的数据卷或 Secret Manager 管理。
+## 主要配置
 
-当已有 Cookie 过期且 Cookie 同步已开启时，网关会以降级模式启动：控制台、健康检查和同步端点仍可访问，模型请求返回未就绪；扩展同步成功后服务立即恢复，不需要重启。
+配置优先级：进程环境变量 > `.env.auth.local` > `.env` > 内置默认值。
 
-## 会话续期
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | 必填 | 普通 API 的本地认证令牌，至少 8 字符 |
+| `GEMINI_ADMIN_TOKEN` | 回退到 API Key | Cookie 与账号管理专用令牌 |
+| `GEMINI_HOST` / `GEMINI_PORT` | `127.0.0.1` / `8000` | 监听地址与端口 |
+| `GEMINI_MODEL` | `gemini-3-flash` | 默认模型名 |
+| `GEMINI_ADVANCED_MODEL` | `gemini-3-pro` | 媒体/高级任务模型名 |
+| `GEMINI_COOKIE_SYNC_ENABLED` | `false` | 允许网关降级启动并等待扩展同步 |
+| `GEMINI_REMOTE_ADMIN_ENABLED` | `false` | 允许非本机来源调用管理接口 |
+| `GEMINI_ACCOUNTS_FILE` | `gateway_data/accounts.local.json` | 多账号凭据文件 |
+| `GEMINI_MAX_ACCOUNT_CONCURRENCY` | `1` | 每账号最大并发数 |
+| `GEMINI_ACCOUNT_COOLDOWN_SECONDS` | `60` | 限流账号冷却时间 |
+| `GEMINI_ACCOUNT_PROBE_SECONDS` | `60` | 后台账号恢复检查周期 |
+| `GEMINI_TASK_WORKERS` / `GEMINI_MAX_TASK_QUEUE` | `1` / `20` | 任务工作数与队列容量 |
+| `GEMINI_TASK_RETENTION_HOURS` | `168` | 已完成任务和产物保留时间 |
+| `GEMINI_ENABLED_GENERATIONS` | 六种任务全部启用 | 逗号分隔的生成类型 |
+| `GEMINI_PROXY` | 自动读取标准代理变量 | URL、`direct` 或 `none` |
+| `GEMINI_CORS_ORIGINS` | 空 | 允许的跨域来源，逗号分隔 |
 
-`__Secure-1PSID` 相对长效，`__Secure-1PSIDTS` 会被 Google 定期轮换，并通过响应的 `Set-Cookie` 下发新值。网关在以下时机接住轮换：会话建立成功、会话刷新成功、以及每次生成请求返回成功响应。新值会写回 `GEMINI_ACCOUNTS_FILE`，因此重启后依然有效。
+完整配置和注释见 [`.env.example`](.env.example)。代理支持 `HTTPS_PROXY`、`ALL_PROXY` 和 `NO_PROXY` 等标准环境变量。
 
-这条链路不需要浏览器，也不需要扩展在线，Docker 和无头服务器部署可以长期无人值守。持久化失败只记录警告，不会中断当次请求，内存中的新值仍然可用。
+## HTTP 端点
 
-仍需要重新授权的情况：
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/` | 内嵌 Web 控制台 |
+| `GET` | `/health`、`/healthz`、`/readyz` | 健康与就绪检查 |
+| `GET` | `/metrics` | Prometheus 文本指标 |
+| `GET` | `/v1/models`、`/v1/capabilities` | 模型与网关能力 |
+| `GET` | `/v1/accounts` | 脱敏账号状态 |
+| `POST` | `/v1/chat/completions` | OpenAI Chat |
+| `POST` | `/v1/responses` | OpenAI Responses |
+| `GET`/`POST` | `/v1beta/models...` | Gemini 模型与内容生成 |
+| `POST` | `/v1/images/generations` | 同步图片生成 |
+| `POST` | `/v1/generations` | 提交异步生成任务 |
+| `GET` | `/v1/tasks` | 分页查询任务 |
+| `GET`/`DELETE` | `/v1/tasks/{id}` | 查询或取消任务 |
+| `GET` | `/files/...` | 读取生成产物 |
+| `POST` | `/admin/cookies/sync` | 验证、更新并持久化 Cookie |
+| `PATCH`/`DELETE` | `/admin/accounts/{id}` | 修改或删除账号 |
 
-- 账号长期完全空闲，`__Secure-1PSIDTS` 在没有任何请求可承载轮换的情况下过期。
-- Google 主动登出会话，或 `__Secure-1PSID` 本身失效。
+错误统一返回：
 
-此时账号会被标记为未就绪，`/v1/accounts` 会显示原因，重新同步一次 Cookie 即可恢复。
-
-### 观察轮换
-
-默认日志级别下，每次接住轮换都会记录一条：
-
-```text
-INFO absorbed a rotated __Secure-1PSIDTS from the provider account_id="default" length=..
+```json
+{"error":{"message":"...","type":"not_ready"}}
 ```
 
-Cookie 值本身永远不会进入日志，只记录长度，便于区分不同的值。
+`503 not_ready` 表示本地没有可用账号，通常同步 Cookie 后即可恢复；`502 provider_error` 表示 Gemini 上游失败，网关会先按配置重试。
 
-想确认机制是否在正常检查（而不是从未触发），打开 debug 级别：
+## 测试
 
-```powershell
-$env:RUST_LOG = "gemini_rust_gateway=debug"
-```
-
-```bash
-RUST_LOG=gemini_rust_gateway=debug
-```
-
-此时每次检查都会输出结果，可区分三种状态：
-
-| 日志 | 含义 |
-| --- | --- |
-| `absorbed a rotated __Secure-1PSIDTS` | 发生轮换并已接住 |
-| `__Secure-1PSIDTS unchanged since the last check` | 检查过，本次未轮换 |
-| `no __Secure-1PSIDTS in the cookie jar` | 提供方从未下发过该 Cookie |
-
-第三种持续出现说明当前部署下不存在 Cookie 轮换，续期完全依赖 `__Secure-1PSID` 的有效期。
-
-## 构建与测试
-
-建议分三层验证。第一层不连接 Google，适合每次改代码后运行。
-
-Linux/macOS 直接使用 cargo：
+Linux/macOS：
 
 ```bash
 cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 cargo build --release --locked
 ```
 
-Windows 必须通过 `build.ps1`，不能直接调用 cargo：
+Windows：
 
 ```powershell
 .\build.ps1 fmt
 .\build.ps1 clippy
 .\build.ps1 test
 .\build.ps1 build -Release
-```
-
-目标三元组是 `x86_64-pc-windows-gnu`，BoringSSL 需要 MSYS2 UCRT64 的 GCC。`build.ps1` 负责定位 MSYS2 并注入 `ucrt64\bin`、`HOST_CC`、`HOST_CXX`、`LIBCLANG_PATH`。在没有这些环境变量的普通 PowerShell 里直接运行 `cargo test` 会在编译 BoringSSL 时失败：
-
-```text
-error occurred in cc-rs: failed to find tool "gcc.exe": program not found
-```
-
-出现这个错误说明绕过了 `build.ps1`，不是代码或依赖的问题。`.\build.ps1 fmt` 和 `.\build.ps1 clean` 不需要 MSYS2，其余子命令找不到 UCRT64 GCC 时会直接报错退出。
-
-Windows 的 Release 构建会把所需的 MSYS2 UCRT 运行库复制到 `target/release`；分发时请让这些 DLL 与 EXE 保持在同一目录。GitHub Release 压缩包已经包含它们。
-
-第二层检查 Cookie、网络和 Gemini 登录态：
-
-```powershell
 .\build.ps1 run -Release doctor --online
 ```
 
-第三层在网关启动后执行真实 API 冒烟测试：
+网关启动后执行端到端验证：
 
 ```powershell
-# 终端 1
-.\start.ps1
-
-# 终端 2：前端、健康、认证、模型和真实聊天
 .\scripts\smoke-test.ps1
-
-# 再验证 Responses API 与 Gemini v1beta
 .\scripts\smoke-test.ps1 -Compatibility
-
-# 再加一次真实图片生成（可能需要几分钟）
 .\scripts\smoke-test.ps1 -Image
 ```
 
-Linux/macOS：
+Linux/macOS 使用 `scripts/smoke-test.sh`，并通过 `GEMINI_TEST_COMPAT=1` 或 `GEMINI_TEST_IMAGE=1` 开启额外测试。
 
-```bash
-bash scripts/smoke-test.sh
-GEMINI_TEST_COMPAT=1 bash scripts/smoke-test.sh
-GEMINI_TEST_IMAGE=1 bash scripts/smoke-test.sh
+测试覆盖协议 fixture、Chat/Responses、Gemini function calling、图像响应解析、多账号权重与 429 故障转移、SQLite 持久化以及 Windows DPAPI。
+
+## 发布与安全
+
+GitHub Actions 会执行格式检查、严格 Clippy、完整测试、Release 构建、JavaScript/Manifest 检查、RustSec 依赖审计和敏感信息扫描。标签构建还会发布 Windows、Linux x86_64/ARM64、GHCR 多架构镜像、SHA-256、SPDX SBOM 和构建来源证明。
+
+安全注意事项：
+
+- Cookie 等同于 Google 登录凭据，不要放入 Issue、日志、截图或聊天；
+- 不要提交 `.env`、`.env.auth.local` 或账号数据文件；
+- 对外开放服务前必须更换默认令牌，并配置 HTTPS、访问控制和限流；
+- 如果 Cookie 曾经公开，请在 Google 账号安全设置中注销相关会话并重新同步。
+
+安全问题请参阅 [SECURITY.md](SECURITY.md)。贡献指南见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 项目结构
+
+```text
+src/                 Rust 网关、协议、账号池、任务与存储
+web/                 编译进二进制的管理控制台
+chrome-extension/    Chrome Cookie 同步扩展
+scripts/             构建检查与端到端冒烟测试
+examples/            Rust 和 TypeScript 调用示例
+tests/                协议与兼容性 fixtures
+vendor/btls-sys/      Windows 构建需要的最小上游补丁
+.github/workflows/    CI、Release 与多架构容器发布
 ```
-
-冒烟脚本从进程环境变量或 `.env` 读取 API Key，但不会输出 Key。图片测试通过异步任务接口提交，并验证最终产物确实是图片文件。
-
-`vendor/btls-sys` 包含 Windows MinGW 构建所需的最小上游补丁，因此需要保留在仓库中。
-
-GitHub Release workflow 会生成 Windows x86_64、Linux x86_64 和 Linux ARM64 三种预编译包，同时发布 SPDX SBOM、SHA-256 校验和与 GitHub 构建证明。标签发布还会构建 `linux/amd64`、`linux/arm64` GHCR 镜像。
-
-## 安全
-
-- 不要提交 `.env` 或 `.env.auth.local`。
-- Cookie 等同于账号登录凭据；只在本机保存，不要放入 Issue、日志或截图。
-- 对外监听前请更换默认 API Key，并使用反向代理、TLS、访问控制和限流。
-- 如果 Cookie 曾经公开，请在 Google 账号中刷新会话后重新配置。
 
 ## License
 
-[AGPL-3.0-only](LICENSE)。`vendor/btls-sys` 及其 BoringSSL 依赖保留各自的上游许可证。
+[AGPL-3.0-only](LICENSE)。`vendor/btls-sys`、BoringSSL 及其他第三方组件保留各自许可证。
