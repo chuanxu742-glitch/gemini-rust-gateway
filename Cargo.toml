@@ -18,7 +18,7 @@ clap = { version = "4", features = ["derive"] }
 dotenvy = "0.15"
 futures-util = "0.3"
 mime_guess = "2"
-rand = "0.9"
+rand = "0.10"
 regex = "1"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 reqwest = { package = "wreq", version = "6.0.0-rc.29", features = ["brotli", "charset", "cookies", "deflate", "form", "gzip", "json", "query", "stream", "zstd"] }
